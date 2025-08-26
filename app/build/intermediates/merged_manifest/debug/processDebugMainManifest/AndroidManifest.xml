@@ -7,7 +7,15 @@
     <uses-sdk
         android:minSdkVersion="24"
         android:targetSdkVersion="34" />
-    <!-- app/src/main/AndroidManifest.xml -->
+    <!-- So Android 11+ can see Termux -->
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
+    <!-- Required by Termux RUN_COMMAND intent -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- Network for GitHub API calls -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <permission
@@ -17,13 +25,13 @@
     <uses-permission android:name="com.example.nextinstaller.debug.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
 
     <application
+        android:allowBackup="true"
         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
         android:debuggable="true"
         android:extractNativeLibs="false"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:theme="@style/Theme.Material3.DayNight.NoActionBar" >
+        android:label="Next Installer"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar" >
         <activity
             android:name="com.example.nextinstaller.MainActivity"
             android:exported="true" >
@@ -33,6 +41,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Receiver or Service is optional if you don't need command results -->
         <activity
             android:name="androidx.compose.ui.tooling.PreviewActivity"
             android:exported="true" />
