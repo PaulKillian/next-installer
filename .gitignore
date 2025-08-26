@@ -1,17 +1,38 @@
-# Android / Gradle
+# Gradle
 .gradle/
-build/
 **/build/
+!gradle/wrapper/gradle-wrapper.jar
+gradle-app.setting
+
+# Local configuration
 local.properties
-*.iml
+*.keystore
+*.jks
+
+# Android Studio / IntelliJ
 .idea/
-captures/
+*.iml
+*.iws
+*.ipr
+
+# NDK / CMake
 .externalNativeBuild/
 .cxx/
 
-# Keystores (if you later create them)
-*.jks
-*.keystore
+# Captures / profiling
+captures/
+*.hprof
 
-# Logs
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs & outputs
 *.log
+app/release/*
+*.apk
+*.aab
+
+# JetBrains Fleet
+.fleet/
+
