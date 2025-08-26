@@ -4,131 +4,162 @@ on:
   repository_dispatch:
     types: [scaffold-nextjs]
 
+# We use a Personal Access Token stored as GH_PAT
+env:
+  GH_PAT: ${{ secrets.GH_PAT }}
+
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   scaffold:
     runs-on: ubuntu-latest
-    env:
-      CREATOR_TOKEN: ${{ secrets.CREATOR_TOKEN }}
     steps:
-      - name: Check inputs
-        run: |
-          echo "event.action: ${{ github.event.action }}"
-          echo "payload: ${{ toJson(github.event.client_payload) }}"
-
-      - name: Install gh CLI (usually preinstalled)
-        run: gh --version
-
-      - name: Parse payload to env
-        id: parse
-        shell: bash
-        run: |
-          pl='${{ toJson(github.event.client_payload) }}'
-          repo_name=$(jq -r '.repo_name' <<<"$pl")
-          owner=$(jq -r '.owner // empty' <<<"$pl")
-          visibility=$(jq -r '.visibility // "private"' <<<"$pl")
-
-          typescript=$(jq -r '.typescript // true' <<<"$pl")
-          eslint=$(jq -r '.eslint // true' <<<"$pl")
-          tailwind=$(jq -r '.tailwind // true' <<<"$pl")
-          src_dir=$(jq -r '.src_dir // true' <<<"$pl")
-          app_router=$(jq -r '.app_router // true' <<<"$pl")
-          import_alias=$(jq -r '.import_alias // ""' <<<"$pl")
-          pkg=$(jq -r '.pkg_manager // "pnpm"' <<<"$pl")
-
-          echo "repo_name=$repo_name" >> $GITHUB_OUTPUT
-          echo "owner=$owner" >> $GITHUB_OUTPUT
-          echo "visibility=$visibility" >> $GITHUB_OUTPUT
-          echo "typescript=$typescript" >> $GITHUB_OUTPUT
-          echo "eslint=$eslint" >> $GITHUB_OUTPUT
-          echo "tailwind=$tailwind" >> $GITHUB_OUTPUT
-          echo "src_dir=$src_dir" >> $GITHUB_OUTPUT
-          echo "app_router=$app_router" >> $GITHUB_OUTPUT
-          echo "import_alias=$import_alias" >> $GITHUB_OUTPUT
-          echo "pkg=$pkg" >> $GITHUB_OUTPUT
-
-      - name: Create repo
-        env:
-          GH_TOKEN: ${{ env.CREATOR_TOKEN }}
+      - name: Validate inputs
         run: |
           set -euo pipefail
-          owner='${{ steps.parse.outputs.owner }}'
-          repo='${{ steps.parse.outputs.repo_name }}'
-          vis='${{ steps.parse.outputs.visibility }}'
-
-          if [[ -z "$repo" ]]; then
-            echo "repo_name missing"; exit 1
+          if [ -z "${{ github.event.client_payload.repo_name }}" ]; then
+            echo "client_payload.repo_name is required"; exit 1
           fi
 
-          if [[ -n "$owner" ]]; then
-            full="$owner/$repo"
-          else
-            # default to the sender/runner org or user
-            full="${{ github.repository_owner }}/$repo"
-          fi
-
-          # Create if not exists
-          if ! gh repo view "$full" >/dev/null 2>&1; then
-            gh repo create "$full" --"$vis" --disable-issues --disable-wiki --confirm
-          else
-            echo "Repo $full already exists; continuing."
-          fi
-
-          echo "full_repo=$full" >> $GITHUB_OUTPUT
+      - name: Checkout runner repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Scaffold Next.js using create-next-app
-        env:
-          FULL_REPO: ${{ steps.create_repo.outputs.full_repo || steps.parse.outputs.owner }}
+      - name: Collect variables / flags
+        id: vars
         shell: bash
         run: |
           set -euo pipefail
 
-          full_repo="$(gh repo view "${{ steps.create_repo.outputs.full_repo }}" --json nameWithOwner -q .nameWithOwner)"
-          repo_dir=$(basename "$full_repo")
+          REPO="${{ github.event.client_payload.repo_name }}"
+          OWNER_INPUT="${{ github.event.client_payload.owner }}"
+          VIS="${{ github.event.client_payload.visibility }}"
+          TS="${{ github.event.client_payload.typescript }}"
+          ESLINT="${{ github.event.client_payload.eslint }}"
+          TAILWIND="${{ github.event.client_payload.tailwind }}"
+          SRCDIR="${{ github.event.client_payload.src_dir }}"
+          APP="${{ github.event.client_payload.app_router }}"
+          ALIAS="${{ github.event.client_payload.import_alias }}"
+          PKG="${{ github.event.client_payload.pkg_manager }}"
 
-          # Install the chosen package manager if needed
-          pkg='${{ steps.parse.outputs.pkg }}'
-          case "$pkg" in
-            pnpm) corepack enable; corepack prepare pnpm@latest --activate ;;
-            yarn) corepack enable; corepack prepare yarn@stable --activate ;;
-            bun)  curl -fsSL https://bun.sh/install | bash; export PATH="$HOME/.bun/bin:$PATH" ;;
-            npm)  ;; # already present
+          # Defaults
+          [ -z "${VIS}" ] && VIS=private
+          [ -z "${PKG}" ] && PKG=pnpm
+          [ -z "${ALIAS}" ] && ALIAS='@/*'
+
+          # Who am I?
+          LOGIN=$(curl -fsS \
+            -H "Authorization: Bearer $GH_PAT" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/user | grep -oP '"login":\s*"\K[^"]+')
+
+          OWNER="$LOGIN"
+          if [ -n "${OWNER_INPUT}" ]; then OWNER="${OWNER_INPUT}"; fi
+
+          # Map pkg manager to flag
+          PM_FLAG="--use-pnpm"
+          case "$PKG" in
+            npm)  PM_FLAG="--use-npm" ;;
+            yarn) PM_FLAG="--use-yarn" ;;
+            pnpm) PM_FLAG="--use-pnpm" ;;
+            bun)  PM_FLAG="--use-bun" ;;
           esac
 
-          flags=()
-          [[ '${{ steps.parse.outputs.typescript }}' == "true" ]] && flags+=(--ts) || flags+=(--no-ts)
-          [[ '${{ steps.parse.outputs.eslint }}' == "true" ]] && flags+=(--eslint) || flags+=(--no-eslint)
-          [[ '${{ steps.parse.outputs.tailwind }}' == "true" ]] && flags+=(--tailwind) || flags+=(--no-tailwind)
-          [[ '${{ steps.parse.outputs.src_dir }}' == "true" ]] && flags+=(--src-dir)
-          [[ '${{ steps.parse.outputs.app_router }}' == "true" ]] && flags+=(--app)
-          ia='${{ steps.parse.outputs.import_alias }}'
-          [[ -n "$ia" ]] && flags+=(--import-alias "$ia")
+          {
+            echo "repo=${REPO}"
+            echo "owner=${OWNER}"
+            echo "login=${LOGIN}"
+            echo "visibility=${VIS}"
+            echo "pm_flag=${PM_FLAG}"
+            echo "ts=${TS}"
+            echo "eslint=${ESLINT}"
+            echo "tailwind=${TAILWIND}"
+            echo "srcdir=${SRCDIR}"
+            echo "app=${APP}"
+            echo "alias=${ALIAS}"
+          } >> "$GITHUB_OUTPUT"
 
-          case "$pkg" in
-            pnpm) flags+=(--use-pnpm) ;;
-            yarn) flags+=(--use-yarn) ;;
-            bun)  flags+=(--use-bun) ;;
-            npm)  ;; 
-          esac
+      - name: Create repository (org or user)
+        env:
+          OWNER: ${{ steps.vars.outputs.owner }}
+          LOGIN: ${{ steps.vars.outputs.login }}
+          REPO:  ${{ steps.vars.outputs.repo }}
+          VIS:   ${{ steps.vars.outputs.visibility }}
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          npx --yes create-next-app@latest "$repo_dir" "${flags[@]}"
+          private_json=true
+          if [ "$VIS" = "public" ]; then private_json=false; fi
 
-          cd "$repo_dir"
-          git init
-          git config user.name  "scaffold-bot"
-          git config user.email "scaffold-bot@users.noreply.github.com"
+          payload=$(printf '{"name":"%s","private":%s,"auto_init":false,"has_issues":true,"has_wiki":false,"has_projects":false}' "$REPO" "$private_json")
+
+          if [ "$OWNER" = "$LOGIN" ]; then
+            # Create under authenticated user
+            curl -fsS -X POST \
+              -H "Authorization: Bearer $GH_PAT" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/user/repos \
+              -d "$payload" \
+              || echo "Repo may already exist; continuing."
+          else
+            # Create under organization
+            curl -fsS -X POST \
+              -H "Authorization: Bearer $GH_PAT" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/orgs/${OWNER}/repos" \
+              -d "$payload" \
+              || echo "Repo may already exist (or you lack org permissions); continuing."
+          fi
+
+      - name: Scaffold Next.js app
+        env:
+          REPO:   ${{ steps.vars.outputs.repo }}
+          TS:     ${{ steps.vars.outputs.ts }}
+          ESLINT: ${{ steps.vars.outputs.eslint }}
+          TAILWIND: ${{ steps.vars.outputs.tailwind }}
+          SRCDIR: ${{ steps.vars.outputs.srcdir }}
+          APP:    ${{ steps.vars.outputs.app }}
+          ALIAS:  ${{ steps.vars.outputs.alias }}
+          PM_FLAG: ${{ steps.vars.outputs.pm_flag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FLAGS=()
+          [ "$TS" = "true" ]      && FLAGS+=("--ts")
+          [ "$ESLINT" = "true" ]  && FLAGS+=("--eslint")
+          [ "$TAILWIND" = "true" ]&& FLAGS+=("--tailwind")
+          [ "$SRCDIR" = "true" ]  && FLAGS+=("--src-dir")
+          [ "$APP" = "true" ]     && FLAGS+=("--app")
+          [ -n "$ALIAS" ]         && FLAGS+=("--import-alias" "$ALIAS")
+
+          # Generate without installing dependencies (node_modules not needed in repo)
+          npx -y create-next-app@latest "$REPO" "${FLAGS[@]}" $PM_FLAG --no-install --yes
+
+          # Small note in README
+          echo -e "\n---\nScaffolded by ${GITHUB_REPOSITORY} on $(date -u +%F)" >> "${REPO}/README.md"
+
+      - name: Commit & push
+        env:
+          OWNER: ${{ steps.vars.outputs.owner }}
+          REPO:  ${{ steps.vars.outputs.repo }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$REPO"
+          git init -b main
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: initial Next.js scaffold"
-
-          # Add remote & push
-          gh repo set-default "$full_repo"
-          git branch -M main
-          git remote add origin "https://github.com/$full_repo.git"
+          git commit -m "chore: bootstrap Next.js project via Actions"
+          git remote add origin "https://x-access-token:${GH_PAT}@github.com/${OWNER}/${REPO}.git"
           git push -u origin main
-
-      - name: Summary
-        run: echo "New repo: https://github.com/${{ steps.create_repo.outputs.full_repo }}"
