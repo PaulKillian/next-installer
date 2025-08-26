@@ -5,6 +5,8 @@
 gradle-app.setting
 
 # Local configuration
+my-release-key.jks
+keystore.properties
 local.properties
 *.keystore
 *.jks

@@ -1,0 +1,134 @@
+name: Scaffold Next.js repo
+
+on:
+  repository_dispatch:
+    types: [scaffold-nextjs]
+
+jobs:
+  scaffold:
+    runs-on: ubuntu-latest
+    env:
+      CREATOR_TOKEN: ${{ secrets.CREATOR_TOKEN }}
+    steps:
+      - name: Check inputs
+        run: |
+          echo "event.action: ${{ github.event.action }}"
+          echo "payload: ${{ toJson(github.event.client_payload) }}"
+
+      - name: Install gh CLI (usually preinstalled)
+        run: gh --version
+
+      - name: Parse payload to env
+        id: parse
+        shell: bash
+        run: |
+          pl='${{ toJson(github.event.client_payload) }}'
+          repo_name=$(jq -r '.repo_name' <<<"$pl")
+          owner=$(jq -r '.owner // empty' <<<"$pl")
+          visibility=$(jq -r '.visibility // "private"' <<<"$pl")
+
+          typescript=$(jq -r '.typescript // true' <<<"$pl")
+          eslint=$(jq -r '.eslint // true' <<<"$pl")
+          tailwind=$(jq -r '.tailwind // true' <<<"$pl")
+          src_dir=$(jq -r '.src_dir // true' <<<"$pl")
+          app_router=$(jq -r '.app_router // true' <<<"$pl")
+          import_alias=$(jq -r '.import_alias // ""' <<<"$pl")
+          pkg=$(jq -r '.pkg_manager // "pnpm"' <<<"$pl")
+
+          echo "repo_name=$repo_name" >> $GITHUB_OUTPUT
+          echo "owner=$owner" >> $GITHUB_OUTPUT
+          echo "visibility=$visibility" >> $GITHUB_OUTPUT
+          echo "typescript=$typescript" >> $GITHUB_OUTPUT
+          echo "eslint=$eslint" >> $GITHUB_OUTPUT
+          echo "tailwind=$tailwind" >> $GITHUB_OUTPUT
+          echo "src_dir=$src_dir" >> $GITHUB_OUTPUT
+          echo "app_router=$app_router" >> $GITHUB_OUTPUT
+          echo "import_alias=$import_alias" >> $GITHUB_OUTPUT
+          echo "pkg=$pkg" >> $GITHUB_OUTPUT
+
+      - name: Create repo
+        env:
+          GH_TOKEN: ${{ env.CREATOR_TOKEN }}
+        run: |
+          set -euo pipefail
+          owner='${{ steps.parse.outputs.owner }}'
+          repo='${{ steps.parse.outputs.repo_name }}'
+          vis='${{ steps.parse.outputs.visibility }}'
+
+          if [[ -z "$repo" ]]; then
+            echo "repo_name missing"; exit 1
+          fi
+
+          if [[ -n "$owner" ]]; then
+            full="$owner/$repo"
+          else
+            # default to the sender/runner org or user
+            full="${{ github.repository_owner }}/$repo"
+          fi
+
+          # Create if not exists
+          if ! gh repo view "$full" >/dev/null 2>&1; then
+            gh repo create "$full" --"$vis" --disable-issues --disable-wiki --confirm
+          else
+            echo "Repo $full already exists; continuing."
+          fi
+
+          echo "full_repo=$full" >> $GITHUB_OUTPUT
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Scaffold Next.js using create-next-app
+        env:
+          FULL_REPO: ${{ steps.create_repo.outputs.full_repo || steps.parse.outputs.owner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          full_repo="$(gh repo view "${{ steps.create_repo.outputs.full_repo }}" --json nameWithOwner -q .nameWithOwner)"
+          repo_dir=$(basename "$full_repo")
+
+          # Install the chosen package manager if needed
+          pkg='${{ steps.parse.outputs.pkg }}'
+          case "$pkg" in
+            pnpm) corepack enable; corepack prepare pnpm@latest --activate ;;
+            yarn) corepack enable; corepack prepare yarn@stable --activate ;;
+            bun)  curl -fsSL https://bun.sh/install | bash; export PATH="$HOME/.bun/bin:$PATH" ;;
+            npm)  ;; # already present
+          esac
+
+          flags=()
+          [[ '${{ steps.parse.outputs.typescript }}' == "true" ]] && flags+=(--ts) || flags+=(--no-ts)
+          [[ '${{ steps.parse.outputs.eslint }}' == "true" ]] && flags+=(--eslint) || flags+=(--no-eslint)
+          [[ '${{ steps.parse.outputs.tailwind }}' == "true" ]] && flags+=(--tailwind) || flags+=(--no-tailwind)
+          [[ '${{ steps.parse.outputs.src_dir }}' == "true" ]] && flags+=(--src-dir)
+          [[ '${{ steps.parse.outputs.app_router }}' == "true" ]] && flags+=(--app)
+          ia='${{ steps.parse.outputs.import_alias }}'
+          [[ -n "$ia" ]] && flags+=(--import-alias "$ia")
+
+          case "$pkg" in
+            pnpm) flags+=(--use-pnpm) ;;
+            yarn) flags+=(--use-yarn) ;;
+            bun)  flags+=(--use-bun) ;;
+            npm)  ;; 
+          esac
+
+          npx --yes create-next-app@latest "$repo_dir" "${flags[@]}"
+
+          cd "$repo_dir"
+          git init
+          git config user.name  "scaffold-bot"
+          git config user.email "scaffold-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: initial Next.js scaffold"
+
+          # Add remote & push
+          gh repo set-default "$full_repo"
+          git branch -M main
+          git remote add origin "https://github.com/$full_repo.git"
+          git push -u origin main
+
+      - name: Summary
+        run: echo "New repo: https://github.com/${{ steps.create_repo.outputs.full_repo }}"

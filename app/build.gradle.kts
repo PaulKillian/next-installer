@@ -4,6 +4,15 @@
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+import java.util.Properties
+
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        load(keystorePropsFile.inputStream())
+    }
+}
+
 android {
     namespace = "com.example.nextinstaller"
     compileSdk = 34
@@ -16,8 +25,41 @@ android {
         versionName = "1.0"
     }
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlin {
+        jvmToolchain(17)
+    }
+
+    buildFeatures {
+        compose = true
+    }
+    // With Kotlin 2.0 + compose plugin, do NOT set composeOptions/kotlinCompilerExtensionVersion.
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    if (keystorePropsFile.exists()) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps["storeFile"] as String)
+                storePassword = keystoreProps["storePassword"] as String
+                keyAlias = keystoreProps["keyAlias"] as String
+                keyPassword = keystoreProps["keyPassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -27,32 +69,9 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // Leave debug unsigned; installDebug uses adb and debug keystore.
         }
     }
-
-    buildFeatures { compose = true }
-
-    // Java -> 17 (Android-approved way)
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    // Kotlin bytecode target
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
-    packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-    }
-}
-
-// Kotlin uses JDK 17 (safe; does NOT add --release to JavaCompile)
-kotlin {
-    jvmToolchain(17)
 }
 
 dependencies {
@@ -66,6 +85,11 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
 
+    implementation("com.google.android.material:material:1.12.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
@@ -74,28 +98,3 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }
-
-signingConfigs {
-    create("release") {
-        val ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
-        val ksPass = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-        val alias = System.getenv("ANDROID_KEY_ALIAS")
-        val keyPass = System.getenv("ANDROID_KEY_PASSWORD")
-        if (!ksPath.isNullOrBlank()) {
-            storeFile = file(ksPath)
-            storePassword = ksPass
-            this.keyAlias = alias
-            this.keyPassword = keyPass
-        }
-    }
-}
-
-buildTypes {
-    getByName("release") {
-        signingConfig = signingConfigs.getByName("release")
-        isMinifyEnabled = true
-        proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-    }
-}
-
-
