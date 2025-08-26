@@ -74,3 +74,28 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }
+
+signingConfigs {
+    create("release") {
+        val ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+        val ksPass = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        val alias = System.getenv("ANDROID_KEY_ALIAS")
+        val keyPass = System.getenv("ANDROID_KEY_PASSWORD")
+        if (!ksPath.isNullOrBlank()) {
+            storeFile = file(ksPath)
+            storePassword = ksPass
+            this.keyAlias = alias
+            this.keyPassword = keyPass
+        }
+    }
+}
+
+buildTypes {
+    getByName("release") {
+        signingConfig = signingConfigs.getByName("release")
+        isMinifyEnabled = true
+        proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+    }
+}
+
+
