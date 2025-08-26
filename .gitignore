@@ -1,0 +1,17 @@
+# Android / Gradle
+.gradle/
+build/
+**/build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Keystores (if you later create them)
+*.jks
+*.keystore
+
+# Logs
+*.log
